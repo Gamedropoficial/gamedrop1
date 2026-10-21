@@ -67,6 +67,9 @@ main{position:relative;z-index:1;max-width:1600px;margin:0 auto;padding:20px}
 .sw input:focus{border-color:var(--acc)}
 .sw input::placeholder{color:var(--mut)}
 .si{position:absolute;left:13px;top:50%;transform:translateY(-50%);color:var(--mut);font-size:14px;pointer-events:none}
+.q-busy{position:absolute;right:10px;top:50%;transform:translateY(-50%);display:flex;align-items:center;color:var(--acc);font-family:var(--fD);font-size:.75rem;font-weight:600;letter-spacing:.3px;background:var(--s1);padding:2px 0 2px 6px;pointer-events:none}
+.q-busy[hidden]{display:none}
+.sw.busy input{padding-right:100px}
 .tier-row{display:flex;gap:5px;align-items:center;flex-wrap:nowrap;flex-shrink:0}
 .tier-row-mob{display:none;gap:5px;margin-bottom:8px;overflow-x:auto;scrollbar-width:none;flex-wrap:nowrap}
 .tier-row-mob::-webkit-scrollbar{display:none}
@@ -243,7 +246,7 @@ main{position:relative;z-index:1;max-width:1600px;margin:0 auto;padding:20px}
     <span class="lu" id="lu"></span>
   </div>
   <div class="toolbar">
-    <div class="sw"><span class="si">🔍</span><input type="text" id="q" placeholder="Buscar juego..." maxlength="60"/></div>
+    <div class="sw"><span class="si">🔍</span><input type="text" id="q" placeholder="Buscar juego..." maxlength="60"/><span class="q-busy" id="qBusy" role="status" hidden><span class="mini-spin"></span>Buscando…</span></div>
     <div id="tfs" class="tier-row"></div>
     <button class="cat-btn" id="catBtn" onclick="toggleCatDropdown()">Categoría ▾</button>
   </div>
@@ -340,6 +343,8 @@ function norm(str){return(str||'').toString().toLowerCase().normalize('NFD').rep
 function listingKey(tier,tag,q){return `${tier}|${tag}|${q}`;}
 // Same rule as the API: queries whose normalized form has fewer than 2 chars are not searched.
 function searchableQuery(raw,min){return norm(raw).length>=min?raw:'';}
+// Stored session {token, exp (ms)} still usable at `now`: reused until 60 s before it expires.
+function freshSession(s,now){return s&&typeof s.token==='string'&&typeof s.exp==='number'&&s.exp-60000>now?s:null;}
 // API item: [name, appId, tierCode, customImage?] -> game fields used by makeCard and the cart (id comes from rememberRow).
 function mapItem(item){const [name,appId,code,image]=item;return{appId,name,tier:TM[code]||'normal',image:image||'',_q:String(name).toLowerCase(),_nq:norm(name)};}
 // AppIDs repeat across tiers in the catalog, so each row (appId|tier|name) gets its own numeric id.
@@ -373,25 +378,6 @@ function findRefinable(listings,tier,tag,rawQ){
   for(const l of listings.values())if(l.complete&&l.tier===tier&&l.tag===tag&&nq.includes(norm(l.q))&&(!best||l.items.length<best.items.length))best=l;
   return best;
 }
-// Listings whose loaded rows can feed a provisional result for rawQ: the one on screen plus any with the same
-// tier/tag whose query is contained in rawQ.
-function provisionalSources(listings,shown,tier,tag,rawQ){
-  const nq=norm(rawQ),out=[];
-  if(shown&&shown.tier===tier&&shown.tag===tag&&shown.items.length)out.push(shown);
-  for(const l of listings.values())if(l!==shown&&l.items.length&&l.tier===tier&&l.tag===tag&&nq.includes(norm(l.q)))out.push(l);
-  return out;
-}
-// Provisional result shown while a search is in flight: loaded rows matching rawQ, deduplicated, in API rank order
-// (ties keep first-seen order). Sources may be partial, so the server result replaces it.
-function localMatches(sources,rawQ){
-  const q=rawQ.toLowerCase(),nq=norm(rawQ),seen=new Set(),hits=[];
-  for(const l of sources)for(const g of l.items){
-    const k=g.key||rowKey(g);if(seen.has(k))continue;seen.add(k);
-    if(g._q.includes(q)||g._nq.includes(nq))hits.push({g,i:hits.length,r:matchRank(g,rawQ)});
-  }
-  hits.sort((a,b)=>a.r-b.r||a.i-b.i);
-  return hits.map(h=>h.g);
-}
 // </catalog-helpers>
 function imgFallback(el,appId,custom){const t=el.dataset.tried||'';if(!t&&custom){el.dataset.tried='custom';el.src=custom;return;}if(t===''||t==='custom'){el.dataset.tried='cf';el.src='https://cdn.cloudflare.steamstatic.com/steam/apps/'+appId+'/header.jpg';}else if(t==='cf'){el.dataset.tried='cap';el.src='https://shared.fastly.steamstatic.com/store_item_assets/steam/apps/'+appId+'/capsule_616x353.jpg';}else{el.onerror=null;el.src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='460' height='215'%3E%3Crect fill='%23141828' width='100%25' height='100%25'/%3E%3Ctext y='50%25' x='50%25' dominant-baseline='middle' text-anchor='middle' fill='%235b6680' font-size='12' font-family='sans-serif'%3ESin imagen%3C/text%3E%3C/svg%3E";}}
 const CUSTOM_FILTERS=[{label:'Todos',key:'all'},{label:'Populares',key:'popular'},{label:'Nuevos',key:'new'},{label:'Single Player',key:'sp',tags:['Singleplayer']},{label:'Acción',key:'action',tags:['Action']},{label:'RPG',key:'rpg',tags:['RPG']},{label:'Shooter',key:'shooter',tags:['Shooter','FPS']},{label:'Terror',key:'horror',tags:['Horror','Survival Horror']},{label:'Mundo Abierto',key:'openworld',tags:['Open World']},{label:'Historia',key:'story',tags:['Story Rich']},{label:'Aventura',key:'adventure',tags:['Adventure']},{label:'Soulslike',key:'souls',tags:['Souls-like']},{label:'Simulación',key:'sim',tags:['Simulation']},{label:'Carreras',key:'racing',tags:['Racing']},{label:'1ª Persona',key:'fp',tags:['First-Person']},{label:'3ª Persona',key:'tp',tags:['Third Person','Third-Person Shooter']},{label:'Indie',key:'indie',tags:['Indie']},{label:'Casual',key:'casual',tags:['Casual']}];
@@ -401,8 +387,8 @@ const SESSION_KEY='gd_catalog_session',RATE_RETRY_MAX=120,FETCH_TIMEOUT=10000,TU
 const TURNSTILE_SRC='https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit&onload=gdTurnstileLoaded';
 const listings=new Map();
 let current=null,viewToken=0,preferApi=false,staleRestarts=0,rateUntil=0,retryTimer=null,prefetchTimer=null,waitingMore=false;
-// shownListing: last real listing rendered; shownProvisional: the grid shows a non-empty provisional result.
-let shownListing=null,shownProvisional=false,prewarmed=false,preloadScheduled=false;
+// memSession: in-memory copy of the session when localStorage is unavailable (private mode, quota).
+let memSession=null,prewarmed=false,idleScheduled=false;
 let sessionPromise=null,turnstileLoad=null,turnstileScript=null,turnstileWidget=null,turnstileWaiters=[],turnstileTimer=null,turnstileGen=0;
 // Aborts on the caller's signal or after FETCH_TIMEOUT; a timeout rejects with TimeoutError (-> fallback, no retry).
 function timedSignal(signal){
@@ -411,9 +397,10 @@ function timedSignal(signal){
   if(signal){if(signal.aborted)c.abort(signal.reason);else signal.addEventListener('abort',()=>{clearTimeout(t);c.abort(signal.reason);},{once:true});}
   return c.signal;
 }
-function storageGet(){try{const s=JSON.parse(sessionStorage.getItem(SESSION_KEY)||'null');return s&&typeof s.token==='string'&&s.exp-60000>Date.now()?s:null;}catch{return null;}}
-function storageSet(s){try{sessionStorage.setItem(SESSION_KEY,JSON.stringify(s));}catch{}}
-function dropSession(){try{sessionStorage.removeItem(SESSION_KEY);}catch{}}
+// localStorage so reloads and other tabs reuse the session without Turnstile; memory when storage throws.
+function storageGet(){let s=null;try{s=JSON.parse(localStorage.getItem(SESSION_KEY)||'null');}catch{}return freshSession(s,Date.now())||freshSession(memSession,Date.now());}
+function storageSet(s){memSession=s;try{localStorage.setItem(SESSION_KEY,JSON.stringify(s));}catch{}}
+function dropSession(){memSession=null;try{localStorage.removeItem(SESSION_KEY);}catch{}}
 function loadTurnstile(){
   if(!turnstileLoad)turnstileLoad=new Promise((resolve,reject)=>{
     window.gdTurnstileLoaded=()=>{turnstileScript=null;resolve(window.turnstile);};
@@ -460,11 +447,14 @@ function ensureSession(){
   if(!sessionPromise)sessionPromise=createSession().finally(()=>{sessionPromise=null;});
   return sessionPromise;
 }
-// Session stays lazy at load; the first sign of intent (search, scroll, filters) starts Turnstile + /v1/session once.
-function prewarmSession(){if(prewarmed)return;prewarmed=true;ensureSession().catch(()=>{});}
-// Fetches api.js into the cache without executing it; loadTurnstile later injects the same URL.
-function preloadTurnstile(){if(turnstileLoad)return;const link=document.createElement('link');link.rel='preload';link.as='script';link.href=TURNSTILE_SRC;document.head.appendChild(link);}
-function scheduleTurnstilePreload(){if(preloadScheduled)return;preloadScheduled=true;if('requestIdleCallback'in window)requestIdleCallback(preloadTurnstile);else setTimeout(preloadTurnstile,1500);}
+// Session (Turnstile + /v1/session) starts at idle after the first render or on the first sign of intent
+// (search, scroll, filters), whichever comes first; ensureSession shares one in-flight promise. Once ready,
+// the scroll-gated prefetch runs again so a listing already scrolled gets its next page cached.
+function prewarmSession(){
+  if(prewarmed)return;prewarmed=true;
+  ensureSession().then(()=>schedulePrefetch(),()=>{prewarmed=false;});
+}
+function scheduleIdleSession(){if(idleScheduled)return;idleScheduled=true;if('requestIdleCallback'in window)requestIdleCallback(prewarmSession);else setTimeout(prewarmSession,1500);}
 async function fetchStaticPage(l,signal){const response=await fetch(`${CFG.apiUrl}/first/${l.tier}-${l.tag}.json`,{signal:timedSignal(signal)});if(!response.ok)throw new Error(`HTTP ${response.status}`);return response.json();}
 async function fetchGamesPage(l,signal){
   const params=new URLSearchParams();
@@ -514,7 +504,7 @@ function selectListing(){
   let l=listings.get(key);
   if(!l&&q){const base=findRefinable(listings,activeTier,activeTag,q);const local=refineLocal(base,q);if(local){l=getListing(activeTier,activeTag,q);l.items=local.items;l.total=local.total;l.next=null;l.complete=true;l.rev=base.rev;}}
   l=l||getListing(activeTier,activeTag,q);
-  if(l===current&&$('grid'))return;
+  if(l===current&&$('grid')){if(!l.loading)clearPending();return;}
   if(current&&current!==l&&current.loading)current.controller?.abort();
   current=l;showCurrent();
 }
@@ -523,34 +513,33 @@ async function showCurrent(){
   if(l.next===undefined){
     // Keep whatever is on screen while loading; the full loader only when there is nothing to show.
     const grid=$('grid');
-    if(grid&&grid.children.length){if(!shownProvisional)grid.classList.add('pending');markSearching();}
-    else{$('cnt').textContent='';$('lu').textContent='';renderCatalogLoader();}
+    if(grid&&grid.children.length)markPending();
+    else{setBusy(false);$('cnt').textContent='';$('lu').textContent='';renderCatalogLoader();}
     try{await loadPage(l);}catch(error){if(token===viewToken)handleLoadError(error,true,l);return;}
     if(token!==viewToken)return;
   }
-  $('refreshBtn').classList.remove('spinning');
-  setCatalogSummary(l);buildVirtualGrid();shownListing=l;shownProvisional=false;scheduleTurnstilePreload();
+  $('refreshBtn').classList.remove('spinning');setBusy(false);
+  setCatalogSummary(l);buildVirtualGrid();scheduleIdleSession();
 }
-function markSearching(){$('cnt').innerHTML='<span class="mini-spin"></span>Buscando…';}
-// Synchronous provisional view for a query whose listing is not loaded yet, from rows already in memory.
-function showProvisional(q){
-  const items=localMatches(provisionalSources(listings,shownListing,activeTier,activeTag,q),q);
-  const grid=$('grid');
-  if(items.length){
-    current={key:'~provisional',tier:activeTier,tag:activeTag,q,items,total:0,next:null,complete:false,provisional:true};
-    buildVirtualGrid();shownProvisional=true;markSearching();
-  }else if(grid&&grid.children.length){grid.classList.add('pending');shownProvisional=false;markSearching();}
+// While a listing loads, the previous cards stay dimmed and the search box shows "Buscando…"; the result
+// replaces them in a single render (no partial local matches in between).
+function setBusy(on){$('qBusy').hidden=!on;$('q').parentElement.classList.toggle('busy',on);}
+function markPending(){$('grid')?.classList.add('pending');setBusy(true);$('cnt').innerHTML='<span class="mini-spin"></span>Buscando…';}
+function clearPending(){
+  $('grid')?.classList.remove('pending');setBusy(false);
+  if(current&&current.next!==undefined)setCatalogSummary(current);
 }
 function onQueryInput(){
   clearTimeout(searchTimer);
   const raw=currentQuery(),q=searchableQuery(raw,CFG.MIN_QUERY),key=listingKey(activeTier,activeTag,q);
   setQueryHint(raw.length>0&&!q);
-  if(current&&current.key===key)return;
-  // Already loaded (e.g. backspace to a previous query) or answerable locally: show it now, no request.
+  // Back to the listing on screen (e.g. typed and deleted a letter): undo the pending state, no request.
+  if(current&&current.key===key){if(!current.loading)clearPending();return;}
+  // Already loaded (e.g. backspace to a previous query) or refinable exactly from a complete listing: show it now.
   const cached=listings.get(key);
   if((cached&&cached.next!==undefined)||(q&&refineLocal(findRefinable(listings,activeTier,activeTag,q),q))){selectListing();return;}
   cancelInFlight();
-  if(q)showProvisional(q);
+  markPending();
   searchTimer=setTimeout(selectListing,CFG.SEARCH_DEBOUNCE);
 }
 async function loadMore(){
@@ -567,7 +556,7 @@ function schedulePrefetch(){
   prefetchTimer=setTimeout(()=>{if(current===l)loadPage(l).catch(()=>{});},CFG.PREFETCH_DELAY);
 }
 function handleLoadError(error,first,l){
-  $('refreshBtn').classList.remove('spinning');
+  $('refreshBtn').classList.remove('spinning');setBusy(false);
   if(error.name==='AbortError'){setTimeout(()=>first?showCurrent():loadMore(),0);return;}
   if(error.cursor&&l===current&&l.cursorResets<1){l.cursorResets++;resetListing(l);showCurrent();return;}
   if(error.stale&&staleRestarts<2){staleRestarts++;preferApi=true;listings.clear();current=null;selectListing();return;}
