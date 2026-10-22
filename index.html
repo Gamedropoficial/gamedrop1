@@ -354,6 +354,9 @@ function liteRefused(status,body){return status===403&&body?.error==='turnstile'
 // A page with next=null ends the listing; capped (scroll cap reached, more results exist) is not complete, so it
 // is never used for local refinement.
 function pageEnd(next,capped){return{next:next||null,complete:!next&&!capped,capped:!next&&!!capped};}
+// 429 handling, never shown to the visitor: a short wait (per-minute budget) is retried quietly up to maxRetries
+// times; a long one (daily budget) or a third 429 returns null so the caller shows the WhatsApp fallback.
+function rateRetryDelay(retryAfter,attempt,maxWait=60,maxRetries=2){return retryAfter>0&&retryAfter<=maxWait&&attempt<maxRetries?retryAfter*1000:null;}
 // API item: [name, appId, tierCode, customImage?] -> game fields used by makeCard and the cart (id comes from rememberRow).
 function mapItem(item){const [name,appId,code,image]=item;return{appId,name,tier:TM[code]||'normal',image:image||'',_q:String(name).toLowerCase(),_nq:norm(name)};}
 // AppIDs repeat across tiers in the catalog, so each row (appId|tier|name) gets its own numeric id.
@@ -392,7 +395,7 @@ function imgFallback(el,appId,custom){const t=el.dataset.tried||'';if(!t&&custom
 const CUSTOM_FILTERS=[{label:'Todos',key:'all'},{label:'Populares',key:'popular'},{label:'Nuevos',key:'new'},{label:'Single Player',key:'sp',tags:['Singleplayer']},{label:'Acción',key:'action',tags:['Action']},{label:'RPG',key:'rpg',tags:['RPG']},{label:'Shooter',key:'shooter',tags:['Shooter','FPS']},{label:'Terror',key:'horror',tags:['Horror','Survival Horror']},{label:'Mundo Abierto',key:'openworld',tags:['Open World']},{label:'Historia',key:'story',tags:['Story Rich']},{label:'Aventura',key:'adventure',tags:['Adventure']},{label:'Soulslike',key:'souls',tags:['Souls-like']},{label:'Simulación',key:'sim',tags:['Simulation']},{label:'Carreras',key:'racing',tags:['Racing']},{label:'1ª Persona',key:'fp',tags:['First-Person']},{label:'3ª Persona',key:'tp',tags:['Third Person','Third-Person Shooter']},{label:'Indie',key:'indie',tags:['Indie']},{label:'Casual',key:'casual',tags:['Casual']}];
 
 // ── Catálogo paginado desde el Worker: páginas estáticas + sesión lite (Turnstile solo al agotarla) + cursores ──
-const SESSION_KEY='gd_catalog_session',RATE_RETRY_MAX=120,FETCH_TIMEOUT=10000,TURNSTILE_TIMEOUT=20000,SLOW_HINT_DELAY=300;
+const SESSION_KEY='gd_catalog_session',FETCH_TIMEOUT=10000,TURNSTILE_TIMEOUT=20000,SLOW_HINT_DELAY=300;
 const TURNSTILE_SRC='https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit&onload=gdTurnstileLoaded';
 const listings=new Map();
 let current=null,viewToken=0,preferApi=false,staleRestarts=0,rateUntil=0,retryTimer=null,prefetchTimer=null,waitingMore=false,slowTimer=null;
@@ -400,6 +403,9 @@ let current=null,viewToken=0,preferApi=false,staleRestarts=0,rateUntil=0,retryTi
 let memSession=null;
 // sessionPromise is the single in-flight session request; sessionFull tells whether it yields a full session.
 // liteDenied: the API refused a lite session for this visitor, so every session of this page load is a full one.
+// upgradeStarted: the background Turnstile upgrade asked by `up` runs at most once per page load.
+// eagerPending: a session became ready before the listing on screen loaded; prefetch its next page once it renders.
+let upgradeStarted=false,eagerPending=false;
 let sessionPromise=null,sessionFull=false,liteDenied=false,turnstileLoad=null,turnstileScript=null,turnstileWidget=null,turnstileWaiters=[],turnstileTimer=null,turnstileGen=0;
 // Aborts on the caller's signal or after FETCH_TIMEOUT; a timeout rejects with TimeoutError (-> fallback, no retry).
 function timedSignal(signal){
@@ -447,7 +453,7 @@ async function rateError(response){let body=null;try{body=await response.json();
 function pendingRateError(){const e=new Error('rate');e.rate=true;e.retryAfter=Math.ceil((rateUntil-Date.now())/1000);return e;}
 // String body without custom headers (text/plain) keeps this a CORS simple request; the API parses it as JSON.
 function postSession(body){return fetch(`${CFG.apiUrl}/v1/session`,{method:'POST',body:JSON.stringify(body),signal:timedSignal()});}
-function keepSession(data){storageSet({token:data.token,exp:data.exp,lite:!!data.lite});return data.token;}
+function keepSession(data){const s={token:data.token,exp:data.exp,lite:!!data.lite};storageSet(s);return s;}
 // Lite first: {} gives an instant session without Turnstile. Turnstile (and its api.js) only runs for a full
 // session, i.e. after a 403 upgrade or when the lite request is refused (403 turnstile, 429) or fails.
 async function createSession(full){
@@ -469,18 +475,30 @@ async function createSession(full){
 }
 function ensureSession(full=false){
   full=full||liteDenied;
-  const stored=storageGet(full);if(stored)return Promise.resolve(stored.token);
+  const stored=storageGet(full);if(stored)return Promise.resolve(stored);
   if(Date.now()<rateUntil)return Promise.reject(pendingRateError());
   if(sessionPromise&&(sessionFull||!full))return sessionPromise;
   // A full session asked while a lite one is in flight waits for it, then replaces it.
   const before=sessionPromise?sessionPromise.catch(()=>{}):Promise.resolve();
-  const p=before.then(()=>{const s=storageGet(full);return s?s.token:createSession(full);}).finally(()=>{if(sessionPromise===p)sessionPromise=null;});
+  const p=before.then(()=>storageGet(full)||createSession(full).then(s=>{setTimeout(sessionReady,0);return s;})).finally(()=>{if(sessionPromise===p)sessionPromise=null;});
   sessionPromise=p;sessionFull=full;
   return p;
 }
-// Opened right at load (lite, instant) so the first search or scroll does not wait for it; once ready, the
-// scroll-gated prefetch runs again so a listing already scrolled gets its next page cached.
-function startSession(){ensureSession().then(()=>schedulePrefetch(),()=>{});}
+// Opened right at load (lite, instant) so the first search or scroll does not wait for it.
+function startSession(){ensureSession().then(sessionReady,()=>{});}
+// A session is ready (at load or after a renewal/upgrade): cache the next page of the listing on screen so the
+// first scroll does not wait, and let the scroll-gated prefetch run for a listing already scrolled.
+function sessionReady(){eagerPending=true;prefetchAhead();schedulePrefetch();}
+// Fetches (without rendering) one page past what is on screen; never more, and never a second request for it.
+function prefetchAhead(){
+  const l=current;if(!l||l.next===undefined)return;
+  eagerPending=false;
+  if(!l.next||l.loading||l.items.length-renderOffset>=CFG.RENDER_CHUNK_SIZE)return;
+  loadPage(l).catch(()=>{});
+}
+// `up`: the lite page budget is half spent. Turnstile -> full session now, in the background, so scrolling and
+// searching never wait for it; requests keep using the lite session until the full one is stored.
+function upgradeInBackground(){if(upgradeStarted||liteDenied||!storageGet(false)?.lite)return;upgradeStarted=true;ensureSession(true).catch(()=>{});}
 async function fetchStaticPage(l,signal){const response=await fetch(`${CFG.apiUrl}/first/${l.tier}-${l.tag}.json`,{signal:timedSignal(signal)});if(!response.ok)throw new Error(`HTTP ${response.status}`);return response.json();}
 async function fetchGamesPage(l,signal){
   const params=new URLSearchParams();
@@ -489,12 +507,16 @@ async function fetchGamesPage(l,signal){
   let full=false,upgraded=false,renewed=false;
   for(;;){
     if(Date.now()<rateUntil)throw pendingRateError();
+    // Cursors are bound to the session that signed them: a cursor page reuses the listing's session while it is
+    // fresh, so a background upgrade (or another tab's session) does not restart the listing on screen.
+    const pinned=params.has('c')&&!full?freshSession(l.session,Date.now()):null;
+    const sess=pinned||await ensureSession(full),token=sess.token;
     // Token as query param and no custom headers: a simple GET, so no CORS preflight per new URL.
-    const token=await ensureSession(full);params.set('s',token);
+    params.set('s',token);
     const response=await fetch(`${CFG.apiUrl}/v1/games?${params}`,{signal:timedSignal(signal)});
     // 401: session expired or bound to another network (wifi <-> mobile data). Renew once (lite first, Turnstile if
     // lite is refused). Cursors are bound to the session, so a cursor page restarts its listing.
-    if(response.status===401&&!renewed){renewed=true;dropSession(token);if(params.has('c'))throw cursorError();continue;}
+    if(response.status===401&&!renewed){renewed=true;dropSession(token);l.session=null;if(params.has('c'))throw cursorError();continue;}
     // Lite page budget used up: Turnstile -> full session (replaces the stored one), then retry once.
     if(response.status===403&&!upgraded){
       let body=null;try{body=await response.json();}catch{}
@@ -507,12 +529,14 @@ async function fetchGamesPage(l,signal){
     if(response.status===429)throw await rateError(response);
     if(response.status===409){const e=new Error('stale');e.stale=true;throw e;}
     if(!response.ok)throw new Error(`HTTP ${response.status}`);
-    return response.json();
+    const data=await response.json();
+    l.session=sess;if(data.up&&sess.lite)upgradeInBackground();
+    return data;
   }
 }
-function getListing(tier,tag,q){const key=listingKey(tier,tag,q);let l=listings.get(key);if(!l){l={key,tier,tag,q,items:[],total:0,next:undefined,complete:false,rev:null,loading:null,controller:null,scrolled:false,cursorResets:0};listings.set(key,l);}return l;}
+function getListing(tier,tag,q){const key=listingKey(tier,tag,q);let l=listings.get(key);if(!l){l={key,tier,tag,q,items:[],total:0,next:undefined,complete:false,rev:null,loading:null,controller:null,scrolled:false,cursorResets:0,rateRetries:0,session:null};listings.set(key,l);}return l;}
 function cursorError(){const e=new Error('cursor');e.cursor=true;return e;}
-function resetListing(l){Object.assign(l,{items:[],total:0,next:undefined,complete:false,capped:false,rev:null,scrolled:false});}
+function resetListing(l){Object.assign(l,{items:[],total:0,next:undefined,complete:false,capped:false,rev:null,scrolled:false,session:null});}
 function appendPage(l,items,total,next,rev,capped){l.items.push(...items.map(item=>rememberRow(GAMES,item)));l.total=total;Object.assign(l,pageEnd(next,capped));l.rev=rev;}
 // next: undefined = nothing loaded, 'skip' = page after the static first page, string = signed cursor, null = end.
 function loadPage(l){
@@ -524,7 +548,7 @@ function loadPage(l){
     const cursorPage=typeof l.next==='string'&&l.next!=='skip';
     const data=await fetchGamesPage(l,controller.signal);
     if(l.rev&&data.rev!==l.rev){const e=new Error('stale');e.stale=true;throw e;}
-    appendPage(l,data.items,data.total,data.next||null,data.rev,data.capped);staleRestarts=0;
+    appendPage(l,data.items,data.total,data.next||null,data.rev,data.capped);staleRestarts=0;l.rateRetries=0;
     if(cursorPage)l.cursorResets=0;
   })().finally(()=>{l.loading=null;l.controller=null;});
   return l.loading;
@@ -542,7 +566,7 @@ function selectListing(){
   l=l||getListing(activeTier,activeTag,q);
   if(l===current&&$('grid')){if(!l.loading)clearPending();return;}
   if(current&&current!==l&&current.loading)current.controller?.abort();
-  current=l;showCurrent();
+  l.rateRetries=0;current=l;showCurrent();
 }
 async function showCurrent(){
   const l=current,token=++viewToken;clearTimers();waitingMore=false;
@@ -556,6 +580,7 @@ async function showCurrent(){
   }
   $('refreshBtn').classList.remove('spinning');setSlowHint(false);
   setCatalogSummary(l);buildVirtualGrid();
+  if(eagerPending)prefetchAhead();
 }
 // While a listing loads, the previous cards stay as they are (visible, clickable) and the result replaces them
 // in a single render. Only a request slower than SLOW_HINT_DELAY shows "Buscando…" with a spinner in the search box.
@@ -585,22 +610,28 @@ async function loadMore(){
   waitingMore=false;setGridTail('');setCatalogSummary(l);renderNextChunk();
 }
 // Prefetch only once the user has scrolled this listing, so typing searches does not spend extra pages.
-function schedulePrefetch(){
+// `now`: a cached page was just consumed by scrolling, so the next one is requested without the delay.
+function schedulePrefetch(now){
   const l=current;clearTimeout(prefetchTimer);
   if(!l?.next||!l.scrolled||l.loading||l.items.length-renderOffset>=CFG.RENDER_CHUNK_SIZE)return;
+  if(now){loadPage(l).catch(()=>{});return;}
   prefetchTimer=setTimeout(()=>{if(current===l)loadPage(l).catch(()=>{});},CFG.PREFETCH_DELAY);
 }
 function handleLoadError(error,first,l){
-  $('refreshBtn').classList.remove('spinning');setSlowHint(false);
+  $('refreshBtn').classList.remove('spinning');
+  // Per-minute limit: no message. The cards and the usual "Buscando…" (or the scroll loader) stay while it retries.
+  const wait=error.rate?rateRetryDelay(error.retryAfter,l.rateRetries):null;
+  if(wait!==null){
+    l.rateRetries++;if(!first)waitingMore=true;
+    clearTimeout(retryTimer);retryTimer=setTimeout(()=>{if(current!==l)return;if(first)showCurrent();else{waitingMore=false;loadMore();}},wait);return;
+  }
+  setSlowHint(false);
   if(error.name==='AbortError'){setTimeout(()=>first?showCurrent():loadMore(),0);return;}
   if(error.cursor&&l===current&&l.cursorResets<1){l.cursorResets++;resetListing(l);showCurrent();return;}
   if(error.stale&&staleRestarts<2){staleRestarts++;preferApi=true;listings.clear();current=null;selectListing();return;}
-  if(error.rate&&error.retryAfter<=RATE_RETRY_MAX){
-    const msg=`<div class="loading"><span>Muchas búsquedas seguidas 🙏 Seguimos en ${error.retryAfter} s...</span></div>`;
-    first?($('gamesArea').innerHTML=msg):setGridTail(msg);
-    clearTimeout(retryTimer);retryTimer=setTimeout(()=>first?showCurrent():loadMore(),error.retryAfter*1000);return;
-  }
-  const box=fallbackBox(error.rate?'Llegaste al límite de búsquedas por ahora.':'');
+  const box=fallbackBox('');
+  // Daily limit: the fallback for this request only, above the cards already on screen.
+  if(first&&error.rate&&$('gridNote')){$('gridNote').innerHTML=box;return;}
   if(first){$('cnt').textContent='';$('lu').textContent='';$('gamesArea').innerHTML=box;}else setGridTail(box);
 }
 function fallbackBox(note){return `<div class="err-box"><strong>Buscá tu juego por WhatsApp</strong>${note?`<span>${esc(note)}</span>`:''}<a class="wa" href="https://wa.me/${CFG.whatsapp}" target="_blank" rel="noopener noreferrer" style="margin-top:12px;text-decoration:none"><span style="font-size:18px">📱</span> Escribinos por WhatsApp</a><button onclick="loadGames(true)" style="margin-top:10px;background:var(--s2);border:1px solid var(--bdr);color:var(--txt);padding:7px 18px;border-radius:8px;cursor:pointer;font-family:var(--fB)">Reintentar</button></div>`;}
@@ -640,10 +671,10 @@ function _renderAllFilters(){
   if(btnEl){const f=CUSTOM_FILTERS.find(f=>f.key===activeTag);const isAll=activeTag==='all';btnEl.textContent=(isAll?'Categoría':'▸ '+f?.label)+' ▾';btnEl.className='cat-btn'+(isAll?'':' active');}
 }
 $('q').addEventListener('input',onQueryInput);
-function buildVirtualGrid(){$('gamesArea').innerHTML='<div id="gridWrap"><div class="vgrid" id="grid"></div><div id="gridSpacer"></div></div><div id="gridTail"></div>';renderOffset=0;lastScrollY=window.scrollY;renderNextChunk();window.removeEventListener('scroll',onScroll);window.addEventListener('scroll',onScroll,{passive:true});}
-function renderNextChunk(){const grid=$('grid'),l=current;if(!grid||!l)return;if(renderOffset>=l.items.length){if(l.next)loadMore();else showEndHint(l);return;}const end=Math.min(renderOffset+CFG.RENDER_CHUNK_SIZE,l.items.length);const frag=document.createDocumentFragment();for(let i=renderOffset;i<end;i++)frag.appendChild(makeCard(l.items[i]));grid.appendChild(frag);renderOffset=end;const wrap=$('gridWrap');if(wrap)wrap.style.minHeight=grid.offsetHeight+'px';showEndHint(l);schedulePrefetch();}
+function buildVirtualGrid(){$('gamesArea').innerHTML='<div id="gridNote"></div><div id="gridWrap"><div class="vgrid" id="grid"></div><div id="gridSpacer"></div></div><div id="gridTail"></div>';renderOffset=0;lastScrollY=window.scrollY;renderNextChunk();window.removeEventListener('scroll',onScroll);window.addEventListener('scroll',onScroll,{passive:true});}
+function renderNextChunk(consumed){const grid=$('grid'),l=current;if(!grid||!l)return;if(renderOffset>=l.items.length){if(l.next)loadMore();else showEndHint(l);return;}const end=Math.min(renderOffset+CFG.RENDER_CHUNK_SIZE,l.items.length);const frag=document.createDocumentFragment();for(let i=renderOffset;i<end;i++)frag.appendChild(makeCard(l.items[i]));grid.appendChild(frag);renderOffset=end;const wrap=$('gridWrap');if(wrap)wrap.style.minHeight=grid.offsetHeight+'px';showEndHint(l);schedulePrefetch(consumed);}
 let scrollThrottle=false,lastScrollY=0;
-function onScroll(){if(scrollThrottle)return;scrollThrottle=true;requestAnimationFrame(()=>{const y=window.scrollY;if(y>lastScrollY&&current&&!current.scrolled&&current.next!==undefined){current.scrolled=true;schedulePrefetch();}lastScrollY=y;if(document.documentElement.scrollHeight-window.scrollY-window.innerHeight<600)renderNextChunk();scrollThrottle=false;});}
+function onScroll(){if(scrollThrottle)return;scrollThrottle=true;requestAnimationFrame(()=>{const y=window.scrollY;if(y>lastScrollY&&current&&!current.scrolled&&current.next!==undefined){current.scrolled=true;schedulePrefetch();}lastScrollY=y;if(document.documentElement.scrollHeight-window.scrollY-window.innerHeight<600)renderNextChunk(true);scrollThrottle=false;});}
 function getCartQty(id){return cart.filter(x=>x.id===id).length;}
 function groupCartItems(items){const m=new Map();items.forEach(g=>{if(m.has(g.id))m.get(g.id).qty+=1;else m.set(g.id,{...g,qty:1});});return[...m.values()];}
 function makeCard(g){
