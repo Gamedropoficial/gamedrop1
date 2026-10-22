@@ -67,9 +67,9 @@ main{position:relative;z-index:1;max-width:1600px;margin:0 auto;padding:20px}
 .sw input:focus{border-color:var(--acc)}
 .sw input::placeholder{color:var(--mut)}
 .si{position:absolute;left:13px;top:50%;transform:translateY(-50%);color:var(--mut);font-size:14px;pointer-events:none}
-.q-busy{position:absolute;right:10px;top:50%;transform:translateY(-50%);display:flex;align-items:center;color:var(--acc);font-family:var(--fD);font-size:.75rem;font-weight:600;letter-spacing:.3px;background:var(--s1);padding:2px 0 2px 6px;pointer-events:none}
-.q-busy[hidden]{display:none}
-.sw.busy input{padding-right:100px}
+.sw::after{content:'';position:absolute;left:9px;right:9px;bottom:0;height:2px;border-radius:2px;opacity:0;pointer-events:none;background:linear-gradient(90deg,transparent,var(--acc),transparent);background-size:40% 100%;background-repeat:no-repeat;transition:opacity .2s}
+.sw.slow::after{opacity:.8;animation:qslow 1s linear infinite}
+@keyframes qslow{from{background-position:-40% 0}to{background-position:140% 0}}
 .tier-row{display:flex;gap:5px;align-items:center;flex-wrap:nowrap;flex-shrink:0}
 .tier-row-mob{display:none;gap:5px;margin-bottom:8px;overflow-x:auto;scrollbar-width:none;flex-wrap:nowrap}
 .tier-row-mob::-webkit-scrollbar{display:none}
@@ -95,8 +95,6 @@ main{position:relative;z-index:1;max-width:1600px;margin:0 auto;padding:20px}
 .err-box strong{display:block;font-family:var(--fD);margin-bottom:8px}
 #gridWrap{position:relative;width:100%}
 .vgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(var(--col),1fr));gap:13px;position:absolute;width:100%;transition:opacity .15s}
-.vgrid.pending{opacity:.5}
-.mini-spin{display:inline-block;width:10px;height:10px;margin-right:6px;vertical-align:-1px;border:2px solid var(--s3);border-top-color:var(--acc);border-radius:50%;animation:spin .8s linear infinite}
 #gridSpacer{width:100%}
 @keyframes fadeUp{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
 .card{background:var(--s1);border:1px solid var(--bdr);border-radius:11px;overflow:hidden;cursor:pointer;position:relative;transition:transform .18s,border-color .18s,box-shadow .18s;animation:fadeUp .2s ease both}
@@ -246,7 +244,7 @@ main{position:relative;z-index:1;max-width:1600px;margin:0 auto;padding:20px}
     <span class="lu" id="lu"></span>
   </div>
   <div class="toolbar">
-    <div class="sw"><span class="si">🔍</span><input type="text" id="q" placeholder="Buscar juego..." maxlength="60"/><span class="q-busy" id="qBusy" role="status" hidden><span class="mini-spin"></span>Buscando…</span></div>
+    <div class="sw"><span class="si">🔍</span><input type="text" id="q" placeholder="Buscar juego..." maxlength="60"/></div>
     <div id="tfs" class="tier-row"></div>
     <button class="cat-btn" id="catBtn" onclick="toggleCatDropdown()">Categoría ▾</button>
   </div>
@@ -345,6 +343,9 @@ function listingKey(tier,tag,q){return `${tier}|${tag}|${q}`;}
 function searchableQuery(raw,min){return norm(raw).length>=min?raw:'';}
 // Stored session {token, exp (ms)} still usable at `now`: reused until 60 s before it expires.
 function freshSession(s,now){return s&&typeof s.token==='string'&&typeof s.exp==='number'&&s.exp-60000>now?s:null;}
+// Session usable for a request: any fresh one, or only a full (Turnstile) one when `full` is required after
+// a 403 upgrade. Sessions stored before lite sessions existed have no `lite` flag and are full.
+function usableSession(s,now,full){const f=freshSession(s,now);return f&&!(full&&f.lite)?f:null;}
 // API item: [name, appId, tierCode, customImage?] -> game fields used by makeCard and the cart (id comes from rememberRow).
 function mapItem(item){const [name,appId,code,image]=item;return{appId,name,tier:TM[code]||'normal',image:image||'',_q:String(name).toLowerCase(),_nq:norm(name)};}
 // AppIDs repeat across tiers in the catalog, so each row (appId|tier|name) gets its own numeric id.
@@ -382,14 +383,15 @@ function findRefinable(listings,tier,tag,rawQ){
 function imgFallback(el,appId,custom){const t=el.dataset.tried||'';if(!t&&custom){el.dataset.tried='custom';el.src=custom;return;}if(t===''||t==='custom'){el.dataset.tried='cf';el.src='https://cdn.cloudflare.steamstatic.com/steam/apps/'+appId+'/header.jpg';}else if(t==='cf'){el.dataset.tried='cap';el.src='https://shared.fastly.steamstatic.com/store_item_assets/steam/apps/'+appId+'/capsule_616x353.jpg';}else{el.onerror=null;el.src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='460' height='215'%3E%3Crect fill='%23141828' width='100%25' height='100%25'/%3E%3Ctext y='50%25' x='50%25' dominant-baseline='middle' text-anchor='middle' fill='%235b6680' font-size='12' font-family='sans-serif'%3ESin imagen%3C/text%3E%3C/svg%3E";}}
 const CUSTOM_FILTERS=[{label:'Todos',key:'all'},{label:'Populares',key:'popular'},{label:'Nuevos',key:'new'},{label:'Single Player',key:'sp',tags:['Singleplayer']},{label:'Acción',key:'action',tags:['Action']},{label:'RPG',key:'rpg',tags:['RPG']},{label:'Shooter',key:'shooter',tags:['Shooter','FPS']},{label:'Terror',key:'horror',tags:['Horror','Survival Horror']},{label:'Mundo Abierto',key:'openworld',tags:['Open World']},{label:'Historia',key:'story',tags:['Story Rich']},{label:'Aventura',key:'adventure',tags:['Adventure']},{label:'Soulslike',key:'souls',tags:['Souls-like']},{label:'Simulación',key:'sim',tags:['Simulation']},{label:'Carreras',key:'racing',tags:['Racing']},{label:'1ª Persona',key:'fp',tags:['First-Person']},{label:'3ª Persona',key:'tp',tags:['Third Person','Third-Person Shooter']},{label:'Indie',key:'indie',tags:['Indie']},{label:'Casual',key:'casual',tags:['Casual']}];
 
-// ── Catálogo paginado desde el Worker: páginas estáticas + sesión Turnstile + cursores ──
-const SESSION_KEY='gd_catalog_session',RATE_RETRY_MAX=120,FETCH_TIMEOUT=10000,TURNSTILE_TIMEOUT=20000;
+// ── Catálogo paginado desde el Worker: páginas estáticas + sesión lite (Turnstile solo al agotarla) + cursores ──
+const SESSION_KEY='gd_catalog_session',RATE_RETRY_MAX=120,FETCH_TIMEOUT=10000,TURNSTILE_TIMEOUT=20000,SLOW_HINT_DELAY=700;
 const TURNSTILE_SRC='https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit&onload=gdTurnstileLoaded';
 const listings=new Map();
-let current=null,viewToken=0,preferApi=false,staleRestarts=0,rateUntil=0,retryTimer=null,prefetchTimer=null,waitingMore=false;
+let current=null,viewToken=0,preferApi=false,staleRestarts=0,rateUntil=0,retryTimer=null,prefetchTimer=null,waitingMore=false,slowTimer=null;
 // memSession: in-memory copy of the session when localStorage is unavailable (private mode, quota).
-let memSession=null,prewarmed=false,idleScheduled=false;
-let sessionPromise=null,turnstileLoad=null,turnstileScript=null,turnstileWidget=null,turnstileWaiters=[],turnstileTimer=null,turnstileGen=0;
+let memSession=null;
+// sessionPromise is the single in-flight session request; sessionFull tells whether it yields a full session.
+let sessionPromise=null,sessionFull=false,turnstileLoad=null,turnstileScript=null,turnstileWidget=null,turnstileWaiters=[],turnstileTimer=null,turnstileGen=0;
 // Aborts on the caller's signal or after FETCH_TIMEOUT; a timeout rejects with TimeoutError (-> fallback, no retry).
 function timedSignal(signal){
   if(AbortSignal.any&&AbortSignal.timeout)return signal?AbortSignal.any([signal,AbortSignal.timeout(FETCH_TIMEOUT)]):AbortSignal.timeout(FETCH_TIMEOUT);
@@ -398,7 +400,7 @@ function timedSignal(signal){
   return c.signal;
 }
 // localStorage so reloads and other tabs reuse the session without Turnstile; memory when storage throws.
-function storageGet(){let s=null;try{s=JSON.parse(localStorage.getItem(SESSION_KEY)||'null');}catch{}return freshSession(s,Date.now())||freshSession(memSession,Date.now());}
+function storageGet(full){let s=null;try{s=JSON.parse(localStorage.getItem(SESSION_KEY)||'null');}catch{}return usableSession(s,Date.now(),full)||usableSession(memSession,Date.now(),full);}
 function storageSet(s){memSession=s;try{localStorage.setItem(SESSION_KEY,JSON.stringify(s));}catch{}}
 function dropSession(){memSession=null;try{localStorage.removeItem(SESSION_KEY);}catch{}}
 function loadTurnstile(){
@@ -429,44 +431,59 @@ function getTurnstileToken(){
 }
 async function rateError(response){let body=null;try{body=await response.json();}catch{}const e=new Error('rate');e.rate=true;e.retryAfter=Math.max(1,parseInt(response.headers.get('Retry-After'),10)||body?.retryAfter||10);rateUntil=Date.now()+e.retryAfter*1000;return e;}
 function pendingRateError(){const e=new Error('rate');e.rate=true;e.retryAfter=Math.ceil((rateUntil-Date.now())/1000);return e;}
-async function createSession(){
+// String body without custom headers (text/plain) keeps this a CORS simple request; the API parses it as JSON.
+function postSession(body){return fetch(`${CFG.apiUrl}/v1/session`,{method:'POST',body:JSON.stringify(body),signal:timedSignal()});}
+function keepSession(data){storageSet({token:data.token,exp:data.exp,lite:!!data.lite});return data.token;}
+// Lite first: {} gives an instant session without Turnstile. Turnstile (and its api.js) only runs for a full
+// session, i.e. after a 403 upgrade or when the lite request is refused (429) or fails.
+async function createSession(full){
+  if(!full){
+    try{const response=await postSession({});if(response.ok)return keepSession(await response.json());}catch{}
+  }
   for(let attempt=0;attempt<2;attempt++){
     const t=await getTurnstileToken();
-    // String body without custom headers (text/plain) keeps this a CORS simple request; the API parses it as JSON.
-    const response=await fetch(`${CFG.apiUrl}/v1/session`,{method:'POST',body:JSON.stringify({t}),signal:timedSignal()});
+    const response=await postSession({t});
     if(response.status===429)throw await rateError(response);
     if(response.status===403&&attempt===0)continue;
     if(!response.ok)throw new Error(`HTTP ${response.status}`);
-    const data=await response.json();storageSet({token:data.token,exp:data.exp});return data.token;
+    return keepSession(await response.json());
   }
   throw new Error('turnstile');
 }
-function ensureSession(){
-  const stored=storageGet();if(stored)return Promise.resolve(stored.token);
+function ensureSession(full=false){
+  const stored=storageGet(full);if(stored)return Promise.resolve(stored.token);
   if(Date.now()<rateUntil)return Promise.reject(pendingRateError());
-  if(!sessionPromise)sessionPromise=createSession().finally(()=>{sessionPromise=null;});
-  return sessionPromise;
+  if(sessionPromise&&(sessionFull||!full))return sessionPromise;
+  // A full session asked while a lite one is in flight waits for it, then replaces it.
+  const before=sessionPromise?sessionPromise.catch(()=>{}):Promise.resolve();
+  const p=before.then(()=>{const s=storageGet(full);return s?s.token:createSession(full);}).finally(()=>{if(sessionPromise===p)sessionPromise=null;});
+  sessionPromise=p;sessionFull=full;
+  return p;
 }
-// Session (Turnstile + /v1/session) starts at idle after the first render or on the first sign of intent
-// (search, scroll, filters), whichever comes first; ensureSession shares one in-flight promise. Once ready,
-// the scroll-gated prefetch runs again so a listing already scrolled gets its next page cached.
-function prewarmSession(){
-  if(prewarmed)return;prewarmed=true;
-  ensureSession().then(()=>schedulePrefetch(),()=>{prewarmed=false;});
-}
-function scheduleIdleSession(){if(idleScheduled)return;idleScheduled=true;if('requestIdleCallback'in window)requestIdleCallback(prewarmSession);else setTimeout(prewarmSession,1500);}
+// Opened right at load (lite, instant) so the first search or scroll does not wait for it; once ready, the
+// scroll-gated prefetch runs again so a listing already scrolled gets its next page cached.
+function startSession(){ensureSession().then(()=>schedulePrefetch(),()=>{});}
 async function fetchStaticPage(l,signal){const response=await fetch(`${CFG.apiUrl}/first/${l.tier}-${l.tag}.json`,{signal:timedSignal(signal)});if(!response.ok)throw new Error(`HTTP ${response.status}`);return response.json();}
 async function fetchGamesPage(l,signal){
   const params=new URLSearchParams();
   if(l.q)params.set('q',l.q);if(l.tag!=='all')params.set('tag',l.tag);if(l.tier!=='all')params.set('tier',l.tier);
   if(l.next==='skip')params.set('skip','1');else if(l.next)params.set('c',l.next);
+  let full=false,upgraded=false;
   for(let attempt=0;;attempt++){
     if(Date.now()<rateUntil)throw pendingRateError();
     // Token as query param and no custom headers: a simple GET, so no CORS preflight per new URL.
-    params.set('s',await ensureSession());
+    params.set('s',await ensureSession(full));
     const response=await fetch(`${CFG.apiUrl}/v1/games?${params}`,{signal:timedSignal(signal)});
     // Cursors are bound to the session: an expired session also invalidates the cursor, so the listing restarts.
     if(response.status===401&&attempt===0){dropSession();if(params.has('c'))throw cursorError();continue;}
+    // Lite page budget used up: Turnstile -> full session (replaces the stored one), then retry once.
+    if(response.status===403&&!upgraded){
+      let body=null;try{body=await response.json();}catch{}
+      if(body?.error!=='upgrade')throw new Error('HTTP 403');
+      upgraded=full=true;
+      if(params.has('c')){await ensureSession(true);throw cursorError();}
+      continue;
+    }
     if(response.status===400&&params.has('c')){let body=null;try{body=await response.json();}catch{}if(body?.error==='cursor')throw cursorError();throw new Error('HTTP 400');}
     if(response.status===429)throw await rateError(response);
     if(response.status===409){const e=new Error('stale');e.stale=true;throw e;}
@@ -496,7 +513,7 @@ function loadPage(l){
 function currentQuery(){return($('q').value||'').trim().slice(0,CFG.MAX_QUERY);}
 function setQueryHint(show){$('qHint').style.display=show?'':'none';}
 function clearTimers(){clearTimeout(retryTimer);clearTimeout(prefetchTimer);retryTimer=prefetchTimer=null;}
-function cancelInFlight(){if(current?.loading){current.controller?.abort();viewToken++;current=null;}}
+function cancelInFlight(){if(current?.loading){current.controller?.abort();viewToken++;current=null;setSlowHint(false);}}
 function selectListing(){
   const raw=currentQuery();const q=searchableQuery(raw,CFG.MIN_QUERY);
   setQueryHint(raw.length>0&&!q);
@@ -513,22 +530,22 @@ async function showCurrent(){
   if(l.next===undefined){
     // Keep whatever is on screen while loading; the full loader only when there is nothing to show.
     const grid=$('grid');
-    if(grid&&grid.children.length)markPending();
-    else{setBusy(false);$('cnt').textContent='';$('lu').textContent='';renderCatalogLoader();}
+    if(grid&&grid.children.length)setSlowHint(true);
+    else{setSlowHint(false);$('cnt').textContent='';$('lu').textContent='';renderCatalogLoader();}
     try{await loadPage(l);}catch(error){if(token===viewToken)handleLoadError(error,true,l);return;}
     if(token!==viewToken)return;
   }
-  $('refreshBtn').classList.remove('spinning');setBusy(false);
-  setCatalogSummary(l);buildVirtualGrid();scheduleIdleSession();
+  $('refreshBtn').classList.remove('spinning');setSlowHint(false);
+  setCatalogSummary(l);buildVirtualGrid();
 }
-// While a listing loads, the previous cards stay dimmed and the search box shows "Buscando…"; the result
-// replaces them in a single render (no partial local matches in between).
-function setBusy(on){$('qBusy').hidden=!on;$('q').parentElement.classList.toggle('busy',on);}
-function markPending(){$('grid')?.classList.add('pending');setBusy(true);$('cnt').innerHTML='<span class="mini-spin"></span>Buscando…';}
-function clearPending(){
-  $('grid')?.classList.remove('pending');setBusy(false);
-  if(current&&current.next!==undefined)setCatalogSummary(current);
+// While a listing loads, the previous cards stay as they are (visible, clickable) and the result replaces them
+// in a single render. Only a request slower than SLOW_HINT_DELAY shows a thin bar under the search box.
+function setSlowHint(on){
+  clearTimeout(slowTimer);slowTimer=null;
+  if(on)slowTimer=setTimeout(()=>$('q').parentElement.classList.add('slow'),SLOW_HINT_DELAY);
+  else $('q').parentElement.classList.remove('slow');
 }
+function clearPending(){setSlowHint(false);if(current&&current.next!==undefined)setCatalogSummary(current);}
 function onQueryInput(){
   clearTimeout(searchTimer);
   const raw=currentQuery(),q=searchableQuery(raw,CFG.MIN_QUERY),key=listingKey(activeTier,activeTag,q);
@@ -539,7 +556,6 @@ function onQueryInput(){
   const cached=listings.get(key);
   if((cached&&cached.next!==undefined)||(q&&refineLocal(findRefinable(listings,activeTier,activeTag,q),q))){selectListing();return;}
   cancelInFlight();
-  markPending();
   searchTimer=setTimeout(selectListing,CFG.SEARCH_DEBOUNCE);
 }
 async function loadMore(){
@@ -556,7 +572,7 @@ function schedulePrefetch(){
   prefetchTimer=setTimeout(()=>{if(current===l)loadPage(l).catch(()=>{});},CFG.PREFETCH_DELAY);
 }
 function handleLoadError(error,first,l){
-  $('refreshBtn').classList.remove('spinning');setBusy(false);
+  $('refreshBtn').classList.remove('spinning');setSlowHint(false);
   if(error.name==='AbortError'){setTimeout(()=>first?showCurrent():loadMore(),0);return;}
   if(error.cursor&&l===current&&l.cursorResets<1){l.cursorResets++;resetListing(l);showCurrent();return;}
   if(error.stale&&staleRestarts<2){staleRestarts++;preferApi=true;listings.clear();current=null;selectListing();return;}
@@ -603,12 +619,6 @@ function _renderAllFilters(){
   if(btnEl){const f=CUSTOM_FILTERS.find(f=>f.key===activeTag);const isAll=activeTag==='all';btnEl.textContent=(isAll?'Categoría':'▸ '+f?.label)+' ▾';btnEl.className='cat-btn'+(isAll?'':' active');}
 }
 $('q').addEventListener('input',onQueryInput);
-(function(){
-  const opts={once:true,passive:true};
-  ['focus','pointerdown','keydown','pointerenter'].forEach(t=>$('q').addEventListener(t,prewarmSession,opts));
-  window.addEventListener('scroll',prewarmSession,opts);
-  ['tfs','tfsMob','tags','catBtn','catDropdown'].forEach(id=>['pointerdown','touchstart'].forEach(t=>$(id)?.addEventListener(t,prewarmSession,opts)));
-})();
 function buildVirtualGrid(){$('gamesArea').innerHTML='<div id="gridWrap"><div class="vgrid" id="grid"></div><div id="gridSpacer"></div></div><div id="gridTail"></div>';renderOffset=0;lastScrollY=window.scrollY;renderNextChunk();window.removeEventListener('scroll',onScroll);window.addEventListener('scroll',onScroll,{passive:true});}
 function renderNextChunk(){const grid=$('grid'),l=current;if(!grid||!l)return;if(renderOffset>=l.items.length){if(l.next)loadMore();return;}const end=Math.min(renderOffset+CFG.RENDER_CHUNK_SIZE,l.items.length);const frag=document.createDocumentFragment();for(let i=renderOffset;i<end;i++)frag.appendChild(makeCard(l.items[i]));grid.appendChild(frag);renderOffset=end;const wrap=$('gridWrap');if(wrap)wrap.style.minHeight=grid.offsetHeight+'px';schedulePrefetch();}
 let scrollThrottle=false,lastScrollY=0;
@@ -801,6 +811,7 @@ document.addEventListener('keydown',e=>{if(!$('reviewsModal').classList.contains
   function sync(){desktop.matches?activate():deactivate();fit();}
   desktop.addEventListener('change',sync);window.addEventListener('resize',fit,{passive:true});sync();
 })();
+startSession();
 buildTierFilters();
 buildTagFilters();
 loadGames();
