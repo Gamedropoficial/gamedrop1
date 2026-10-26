@@ -420,6 +420,13 @@ function openDiscordApp(httpsUrl,ua,touchPoints,w){
   w.location.href=app;
   return true;
 }
+// Automatic return right after the order is created (still inside the click's user activation): desktop opens the
+// app with the same fallback, mobile sends this tab to the https link. Only discord.com/channels/<digits>/<digits>.
+function discordAutoReturn(httpsUrl,ua,touchPoints,w){
+  if(!discordAppUrl(httpsUrl))return null;
+  if(openDiscordApp(httpsUrl,ua,touchPoints,w))return'app';
+  w.location.assign(safeDiscordUrl(httpsUrl));return'https';
+}
 // Same limits the Worker enforces (MAX_JUEGOS, MAX_DETALLE).
 function discordOrderTooLong(juegos,detalle){return juegos.length>2000||detalle.length>4000;}
 // </discord-helpers>
@@ -776,9 +783,12 @@ async function sendDiscordOrder(juegos,monto,detalle){
   const r=discordOrderResult(status,data,CFG.discordChannelUrl);
   if(r.kind==='ok'){
     const ids=[...new Set(cart.map(g=>g.id))];cart=[];updateCartBadge();ids.forEach(refreshCard);renderCartList();renderTotals();
-    setDiscordStatus('ok',`Pedido #${esc(r.id)} creado ✅<br><a href="${esc(r.url)}" target="_blank" rel="noopener noreferrer">Volver a Discord</a>`);
+    const url=discordAppUrl(r.url)?r.url:CFG.discordChannelUrl;
+    setDiscordStatus('ok',`Pedido #${esc(r.id)} creado ✅<br><a href="${esc(url)}" target="_blank" rel="noopener noreferrer">Volver a Discord</a>`);
     const back=$('dcStatus')?.querySelector?.('a');
-    if(back)back.addEventListener('click',ev=>{if(openDiscordApp(r.url,navigator.userAgent,navigator.maxTouchPoints||0,window))ev.preventDefault();});
+    if(back)back.addEventListener('click',ev=>{if(openDiscordApp(url,navigator.userAgent,navigator.maxTouchPoints||0,window))ev.preventDefault();});
+    // Some browsers block the protocol launch without a fresh gesture: the link above stays as the manual fallback.
+    try{discordAutoReturn(url,navigator.userAgent,navigator.maxTouchPoints||0,window);}catch(e){console.error('Volver a Discord:',e);}
   }else if(r.kind==='expired'){exitDiscordMode();setDiscordStatus('err','Tu link de Discord venció. Volvé a Discord y tocá <strong>Comprar</strong> de nuevo para recibir uno nuevo.');}
   else if(r.kind==='invalid')setDiscordStatus('err',DISCORD_INVALID_MSG);
   else if(r.kind==='limit')setDiscordStatus('err','Ya hiciste varios pedidos en la última hora. Probá de nuevo más tarde o escribinos en Discord.');
