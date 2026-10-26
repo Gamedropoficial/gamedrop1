@@ -43,14 +43,12 @@ header{position:sticky;top:0;z-index:100;background:rgba(7,9,15,.93);backdrop-fi
 .top-action-btn-reviews{border-color:rgba(255,224,0,.35);background:rgba(255,224,0,.06);color:#ffe000}
 .top-action-btn-reviews:hover{border-color:rgba(255,224,0,.65);background:rgba(255,224,0,.12);color:#fff3a0}
 .top-action-btn-wa:hover{border-color:#4ade80;color:#4ade80;background:rgba(74,222,128,.08)}
-.refresh-btn{background:none;border:1px solid var(--bdr);color:var(--mut);padding:6px 10px;border-radius:7px;cursor:pointer;font-family:var(--fB);font-size:.78rem;display:flex;align-items:center;gap:4px;transition:all .15s}
-.refresh-btn:hover{border-color:var(--acc);color:var(--acc)}
-.refresh-btn.spinning .ic{display:inline-block;animation:spin .8s linear infinite}
 @keyframes spin{to{transform:rotate(360deg)}}
 .cart-btn-desk{background:var(--s2);border:1px solid var(--bdr);color:var(--txt);padding:7px 14px;border-radius:8px;cursor:pointer;font-family:var(--fB);font-size:.85rem;font-weight:500;display:flex;align-items:center;gap:6px;transition:all .2s;white-space:nowrap}
 .cart-btn-desk:hover{background:var(--acc-dim);border-color:var(--acc);color:var(--acc)}
 .cart-count{background:var(--acc);color:#000;font-size:.62rem;font-weight:700;min-width:18px;height:18px;border-radius:9px;padding:0 4px;display:flex;align-items:center;justify-content:center;font-family:var(--fD);transition:transform .15s}
 .cart-count.pop{transform:scale(1.5)}
+.cart-total{display:none}
 .price-banner{background:#060d1a;border-bottom:1px solid var(--bdr)}
 .pb-inner{display:flex;align-items:center;height:48px;gap:7px;padding:0 20px;overflow-x:auto;scrollbar-width:none;justify-content:center}
 .pb-inner::-webkit-scrollbar{display:none}
@@ -218,6 +216,26 @@ main{position:relative;z-index:1;max-width:1600px;margin:0 auto;padding:20px}
 .dc-status{font-family:var(--fB);font-size:.85rem;line-height:1.4;margin-bottom:10px}.dc-status:empty{display:none}.dc-status.ok{color:var(--acc)}.dc-status.err{color:#ff8a8a}.dc-status a{display:inline-block;margin-top:6px;color:#fff;background:#5865F2;padding:6px 14px;border-radius:8px;text-decoration:none;font-weight:600}
 @media(max-width:768px){:root{--col:155px}.bottom-nav{display:flex}.cart-btn-desk{display:none}.top-actions-desk{display:none}main{padding:16px 14px}header{padding:0 14px}.pb-inner{padding:0 14px}}
 @media(min-width:769px){body{padding-bottom:0}.bottom-nav{display:none}.top-actions-desk{display:flex}}
+/* <desktop-header> PC only (L48): clearer header hierarchy; mobile and tablet keep the rules above. */
+@media(min-width:900px){
+header{height:64px;padding:0 max(20px,calc((100% - 1560px)/2));background:linear-gradient(180deg,rgba(22,29,48,.97),rgba(11,15,27,.95));border-bottom:2px solid var(--acc);box-shadow:0 4px 20px rgba(0,229,160,.1);justify-content:flex-start;gap:28px}
+.hdr-right{flex:1;justify-content:space-between;gap:16px}
+.top-actions-desk{gap:6px}
+.top-action-btn{background:transparent;border-color:transparent;color:#fff;padding:10px 16px;font-size:1rem;border-radius:10px}
+.top-action-btn:hover{background:rgba(255,255,255,.06);border-color:transparent;color:var(--acc);text-decoration:underline;text-decoration-thickness:2px;text-underline-offset:6px}
+.top-action-btn-pur:hover{color:var(--pur);background:var(--pur-dim)}
+.top-action-btn-reviews{background:rgba(255,224,0,.12);border-color:rgba(255,224,0,.45);color:#ffe000}
+.top-action-btn-reviews:hover{background:rgba(255,224,0,.2);border-color:rgba(255,224,0,.75);color:#fff3a0}
+.cart-btn-desk{height:44px;padding:0 18px;background:var(--acc);border-color:var(--acc);color:#04130d;font-size:1rem;font-weight:700;border-radius:10px;gap:8px;box-shadow:0 4px 16px var(--acc-glow)}
+.cart-btn-desk:hover{background:#3df0bb;border-color:#3df0bb;color:#04130d;transform:translateY(-1px)}
+.cart-total:not(:empty){display:inline;font-family:var(--fD)}
+.cart-count{background:#04130d;color:var(--acc);min-width:22px;height:22px;border-radius:11px;font-size:.75rem}
+.cart-count.pop{transform:none}
+.top-action-btn:focus-visible,.cart-btn-desk:focus-visible{outline:2px solid #fff;outline-offset:3px}
+@keyframes cartBump{0%{transform:scale(1)}40%{transform:scale(1.35)}100%{transform:scale(1)}}
+}
+@media(min-width:900px) and (prefers-reduced-motion:no-preference){.cart-count.bump{animation:cartBump .35s ease}}
+/* </desktop-header> */
 </style>
 </head>
 <body>
@@ -229,8 +247,7 @@ main{position:relative;z-index:1;max-width:1600px;margin:0 auto;padding:20px}
        <button class="top-action-btn top-action-btn-pur" onclick="openHow()">🎬 ¿Cómo funciona?</button>
         <button class="top-action-btn top-action-btn-reviews" onclick="openReviews()">★ Ver reseñas</button>
     </div>
-    <button class="refresh-btn" id="refreshBtn" onclick="loadGames(true)"><span class="ic">↻</span> Actualizar</button>
-    <button class="cart-btn-desk" onclick="openPanel()">🛒 Mi Pedido <div class="cart-count" id="cartCountDesk">0</div></button>
+    <button class="cart-btn-desk" onclick="openPanel()">🛒 Mi Pedido <span class="cart-total" id="cartTotalDesk"></span><div class="cart-count" id="cartCountDesk">0</div></button>
   </div>
 </header>
 <div class="price-banner">
@@ -430,6 +447,10 @@ function discordAutoReturn(httpsUrl,ua,touchPoints,w){
 // Same limits the Worker enforces (MAX_JUEGOS, MAX_DETALLE).
 function discordOrderTooLong(juegos,detalle){return juegos.length>2000||detalle.length>4000;}
 // </discord-helpers>
+// <header-helpers> Pure helpers for the desktop header (no DOM, no network); storefront-v2/test evaluates this block.
+// "· $19.900" next to "Mi Pedido"; empty (hidden by CSS) when the cart is empty.
+function cartTotalLabel(count,total,currency){return count>0&&Number.isFinite(total)&&total>0?'· '+currency+Number(total).toLocaleString('es-AR'):'';}
+// </header-helpers>
 function imgFallback(el,appId,custom){const t=el.dataset.tried||'';if(!t&&custom){el.dataset.tried='custom';el.src=custom;return;}if(t===''||t==='custom'){el.dataset.tried='cf';el.src='https://cdn.cloudflare.steamstatic.com/steam/apps/'+appId+'/header.jpg';}else if(t==='cf'){el.dataset.tried='cap';el.src='https://shared.fastly.steamstatic.com/store_item_assets/steam/apps/'+appId+'/capsule_616x353.jpg';}else{el.onerror=null;el.src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='460' height='215'%3E%3Crect fill='%23141828' width='100%25' height='100%25'/%3E%3Ctext y='50%25' x='50%25' dominant-baseline='middle' text-anchor='middle' fill='%235b6680' font-size='12' font-family='sans-serif'%3ESin imagen%3C/text%3E%3C/svg%3E";}}
 const CUSTOM_FILTERS=[{label:'Todos',key:'all'},{label:'Populares',key:'popular'},{label:'Más vendidos',key:'sold'},{label:'Nuevos',key:'new'},{label:'Single Player',key:'sp',tags:['Singleplayer']},{label:'Acción',key:'action',tags:['Action']},{label:'RPG',key:'rpg',tags:['RPG']},{label:'Shooter',key:'shooter',tags:['Shooter','FPS']},{label:'Terror',key:'horror',tags:['Horror','Survival Horror']},{label:'Mundo Abierto',key:'openworld',tags:['Open World']},{label:'Historia',key:'story',tags:['Story Rich']},{label:'Aventura',key:'adventure',tags:['Adventure']},{label:'Soulslike',key:'souls',tags:['Souls-like']},{label:'Simulación',key:'sim',tags:['Simulation']},{label:'Carreras',key:'racing',tags:['Racing']},{label:'1ª Persona',key:'fp',tags:['First-Person']},{label:'3ª Persona',key:'tp',tags:['Third Person','Third-Person Shooter']},{label:'Indie',key:'indie',tags:['Indie']},{label:'Casual',key:'casual',tags:['Casual']}];
 
@@ -617,7 +638,7 @@ async function showCurrent(){
     try{await loadPage(l);}catch(error){if(token===viewToken)handleLoadError(error,true,l);return;}
     if(token!==viewToken)return;
   }
-  $('refreshBtn').classList.remove('spinning');setSlowHint(false);
+  setSlowHint(false);
   setCatalogSummary(l);buildVirtualGrid();
   if(eagerPending)prefetchAhead();
 }
@@ -657,7 +678,6 @@ function schedulePrefetch(now){
   prefetchTimer=setTimeout(()=>{if(current===l)loadPage(l).catch(()=>{});},CFG.PREFETCH_DELAY);
 }
 function handleLoadError(error,first,l){
-  $('refreshBtn').classList.remove('spinning');
   // Per-minute limit: no message. The cards and the usual "Buscando…" (or the scroll loader) stay while it retries.
   const wait=error.rate?rateRetryDelay(error.retryAfter,l.rateRetries):null;
   if(wait!==null){
@@ -683,7 +703,7 @@ function setCatalogSummary(l){const visible=l.total;$('cnt').textContent=`${visi
 function loadGames(manual=false){
   clearTimeout(searchTimer);clearTimers();current?.controller?.abort();
   listings.clear();current=null;staleRestarts=0;
-  $('refreshBtn').classList.add('spinning');selectListing();
+  selectListing();
 }
 function buildTierFilters(){
   const L={all:'Todos',normal:'🟢 Normal',premium:'💛 Premium',special:'🟣 Especial'};
@@ -744,8 +764,11 @@ function makeCard(g){
 }
 function refreshCard(id){const els=document.querySelectorAll(`.card[data-id="${id}"]`);if(!els.length)return;const g=GAMES.byId.get(id);if(!g)return;els.forEach(el=>el.replaceWith(makeCard(g)));}
 function calcTotal(){const P=CFG.prices;const normals=cart.filter(g=>!g.tier||g.tier==='normal');const premiums=cart.filter(g=>g.tier==='premium');const specials=cart.filter(g=>g.tier==='special');const giftsAvail=specials.length*P.special.gifts;const freeNormalItems=normals.slice(0,Math.min(giftsAvail,normals.length));const freeNormalCounts={};freeNormalItems.forEach(g=>{freeNormalCounts[g.id]=(freeNormalCounts[g.id]||0)+1;});const giftsUsed=freeNormalItems.length;const giftsRem=giftsAvail-giftsUsed;const paidNormalsCount=normals.length-giftsUsed;const pk6=Math.floor(paidNormalsCount/6);const r6=paidNormalsCount%6;const pk3=Math.floor(r6/3);const sg=r6%3;const normTot=pk6*P.normal.pack6+pk3*P.normal.pack3+sg*P.normal.single;const hasMix=(premiums.length>=2)||normals.length>0||specials.length>0;const pUnit=hasMix?P.premium.mixed:P.premium.solo;return{total:normTot+premiums.length*pUnit+specials.length*P.special.price,normTot,freeNormalCounts,giftsAvail,giftsRem,giftsUsed,pk6,pk3,sg,n:paidNormalsCount,hasMix,pUnit,normals,premiums,specials};}
-function updateCartBadge(){const n=cart.length;[$('cartCountDesk'),$('cartBadge')].forEach(el=>{if(!el)return;el.textContent=n;el.classList.add('pop');setTimeout(()=>el.classList.remove('pop'),200);});}
-function addToCart(id){const g=GAMES.byId.get(id);if(!g||g.tier==='prox')return;if(getCartQty(id)>=CFG.MAX_PER_GAME)return;cart.push(g);updateCartBadge();refreshCard(id);renderCartList();renderTotals();}
+function updateCartBadge(added){const n=cart.length;[$('cartCountDesk'),$('cartBadge')].forEach(el=>{if(!el)return;el.textContent=n;el.classList.add('pop');setTimeout(()=>el.classList.remove('pop'),200);});
+  const t=$('cartTotalDesk');if(t)t.textContent=cartTotalLabel(n,n?calcTotal().total:0,CFG.currency);
+  // Desktop bump on add (CSS: ≥900px and no reduced-motion); restart the animation on consecutive adds.
+  const d=$('cartCountDesk');if(added&&d){d.classList.remove('bump');void d.offsetWidth;d.classList.add('bump');}}
+function addToCart(id){const g=GAMES.byId.get(id);if(!g||g.tier==='prox')return;if(getCartQty(id)>=CFG.MAX_PER_GAME)return;cart.push(g);updateCartBadge(true);refreshCard(id);renderCartList();renderTotals();}
 function removeFromCart(id){const idx=cart.findIndex(x=>x.id===id);if(idx===-1)return;cart.splice(idx,1);updateCartBadge();refreshCard(id);renderCartList();renderTotals();}
 function renderCartList(){const el=$('cl');if(!cart.length){el.innerHTML='<div class="empty">🎮<br><br>Agregá juegos al pedido</div>';updGN({giftsAvail:0,giftsRem:0});return;}const c=calcTotal();updGN(c);const TL={normal:'NORMAL',premium:'PREMIUM',special:'ESPECIAL + 2 juegos de REGALO'};const grouped=groupCartItems(cart);el.innerHTML=grouped.map(g=>{const t=g.tier||'normal';const freeCount=c.freeNormalCounts[g.id]||0;const paidCount=g.qty-freeCount;let tagText=TL[t]||'';if(t==='normal'&&freeCount>0)tagText=freeCount===g.qty?`🎁 GRATIS x${freeCount}`:`🎁 GRATIS x${freeCount} · Pago x${paidCount}`;const actionBtn=g.qty>=1?`<button class="rm" onclick="event.stopPropagation();removeFromCart(${g.id})">−</button>`:`<button class="rm" onclick="event.stopPropagation();addToCart(${g.id})">+</button>`;return`<div class="ci"><img class="cimg" loading="lazy" src="${imgUrl(g.appId,g.image)}" onerror="imgFallback(this,${g.appId},${JSON.stringify(g.image)})" alt=""><div class="cinfo"><div class="cname">${esc(g.name)} ×${g.qty}</div><div class="ctag ${freeCount>0?'f':t[0]}">${tagText}</div></div>${actionBtn}</div>`;}).join('');}
 function updGN({giftsAvail,giftsRem}){const el=$('gn'),tx=$('gntxt');if(!giftsAvail){el.classList.remove('show');return;}el.classList.add('show');if(giftsRem>0){el.className='gn show pe';tx.textContent=`Podés agregar ${giftsRem} juego${giftsRem>1?'s':''} normal${giftsRem>1?'es':''} de regalo`;}else{el.className='gn show ok';tx.textContent=`${giftsAvail} regalo${giftsAvail>1?'s':''} aplicado${giftsAvail>1?'s':''} ✓`;}}
