@@ -213,6 +213,9 @@ main{position:relative;z-index:1;max-width:1600px;margin:0 auto;padding:20px}
 .wa{width:100%;background:#25D366;color:#fff;border:none;padding:13px;border-radius:9px;font-family:var(--fD);font-size:.88rem;font-weight:700;letter-spacing:1px;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:8px;transition:all .2s;text-transform:uppercase}
 .wa:hover:not(:disabled){background:#1db954;transform:translateY(-1px);box-shadow:0 4px 18px rgba(37,211,102,.4)}
 .wa:disabled{background:var(--s2);color:var(--mut);cursor:not-allowed;transform:none;box-shadow:none}
+.wa.dc{background:#5865F2}.wa.dc:hover:not(:disabled){background:#4752c4;box-shadow:0 4px 18px rgba(88,101,242,.4)}.wa.dc:disabled{background:var(--s2)}
+.dc-banner{background:#5865F2;color:#fff;text-align:center;font-family:var(--fB);font-size:.8rem;font-weight:600;padding:6px 12px;letter-spacing:.5px}
+.dc-status{font-family:var(--fB);font-size:.85rem;line-height:1.4;margin-bottom:10px}.dc-status:empty{display:none}.dc-status.ok{color:var(--acc)}.dc-status.err{color:#ff8a8a}.dc-status a{display:inline-block;margin-top:6px;color:#fff;background:#5865F2;padding:6px 14px;border-radius:8px;text-decoration:none;font-weight:600}
 @media(max-width:768px){:root{--col:155px}.bottom-nav{display:flex}.cart-btn-desk{display:none}.top-actions-desk{display:none}main{padding:16px 14px}header{padding:0 14px}.pb-inner{padding:0 14px}}
 @media(min-width:769px){body{padding-bottom:0}.bottom-nav{display:none}.top-actions-desk{display:flex}}
 </style>
@@ -329,6 +332,8 @@ const CFG={storeName:'GAMEDROP',whatsapp:'5491173597848',aliasTienda:'gamedrop',
   apiUrl:'https://gamedrop-catalog-api.programas-activacion-ok.workers.dev',
   turnstileSiteKey:'0x4AAAAAAFfdg_66PVG7TOnu',
   pedidoUrl:'https://flow.retroverse.games/webhook/gamedrop-pedido',
+  discordOrderUrl:'https://gamedrop-discord-bot.gamedro-soporte.workers.dev/orders',
+  discordChannelUrl:'https://discord.com/channels/1562839998670307398/1562840333992075345',
   prices:{normal:{single:9900,pack3:19900,pack6:29900},premium:{solo:14000,mixed:10000},special:{price:25000,gifts:2}},
    mensajeWA:'*PEDIDO {storeName}* — #{id_pedido}\n━━━━━━━━━━━━━━━━━━━━\n{listaNormal}{listaPremium}{listaEspecial}\n━━━━━━━━━━━━━━━━━━━━\n *TOTAL: {total}*\n',
    howItWorksVideoUrl:'media/demostracion.mp4', // Set a local path such as 'media/how-it-works.mp4' or a hosted MP4 URL.
@@ -391,6 +396,16 @@ function findRefinable(listings,tier,tag,rawQ){
   return best;
 }
 // </catalog-helpers>
+// <discord-helpers> Pure helpers for Discord mode (no DOM, no network); storefront-v2/test evaluates this block.
+// Discord mode = the personal link from the #pedido button: ?src=discord&t=<signed token>.
+function discordParams(search){const p=new URLSearchParams(search);const t=p.get('t');return p.get('src')==='discord'&&t&&/^[A-Za-z0-9_-]{1,1000}\.[A-Za-z0-9_-]{1,200}$/.test(t)?{t}:null;}
+function stripDiscordParams(href){const u=new URL(href);u.searchParams.delete('src');u.searchParams.delete('t');return u.pathname+u.search+u.hash;}
+function discordOrderBody(t,juegos,monto,detalle){return JSON.stringify({t,juegos,monto,detalle});}
+function safeDiscordUrl(u){try{const x=new URL(u);return x.protocol==='https:'&&x.hostname==='discord.com'?x.href:null;}catch{return null;}}
+function discordOrderResult(status,data,channelUrl){if(status===200&&data?.ok&&typeof data.id_pedido==='string')return{kind:'ok',id:data.id_pedido,url:safeDiscordUrl(data.thread_url)||channelUrl};if(status===401)return{kind:'expired'};if(status===400)return{kind:'invalid'};if(status===429)return{kind:'limit'};return{kind:'retry'};}
+// Same limits the Worker enforces (MAX_JUEGOS, MAX_DETALLE).
+function discordOrderTooLong(juegos,detalle){return juegos.length>2000||detalle.length>4000;}
+// </discord-helpers>
 function imgFallback(el,appId,custom){const t=el.dataset.tried||'';if(!t&&custom){el.dataset.tried='custom';el.src=custom;return;}if(t===''||t==='custom'){el.dataset.tried='cf';el.src='https://cdn.cloudflare.steamstatic.com/steam/apps/'+appId+'/header.jpg';}else if(t==='cf'){el.dataset.tried='cap';el.src='https://shared.fastly.steamstatic.com/store_item_assets/steam/apps/'+appId+'/capsule_616x353.jpg';}else{el.onerror=null;el.src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='460' height='215'%3E%3Crect fill='%23141828' width='100%25' height='100%25'/%3E%3Ctext y='50%25' x='50%25' dominant-baseline='middle' text-anchor='middle' fill='%235b6680' font-size='12' font-family='sans-serif'%3ESin imagen%3C/text%3E%3C/svg%3E";}}
 const CUSTOM_FILTERS=[{label:'Todos',key:'all'},{label:'Populares',key:'popular'},{label:'Más vendidos',key:'sold'},{label:'Nuevos',key:'new'},{label:'Single Player',key:'sp',tags:['Singleplayer']},{label:'Acción',key:'action',tags:['Action']},{label:'RPG',key:'rpg',tags:['RPG']},{label:'Shooter',key:'shooter',tags:['Shooter','FPS']},{label:'Terror',key:'horror',tags:['Horror','Survival Horror']},{label:'Mundo Abierto',key:'openworld',tags:['Open World']},{label:'Historia',key:'story',tags:['Story Rich']},{label:'Aventura',key:'adventure',tags:['Adventure']},{label:'Soulslike',key:'souls',tags:['Souls-like']},{label:'Simulación',key:'sim',tags:['Simulation']},{label:'Carreras',key:'racing',tags:['Racing']},{label:'1ª Persona',key:'fp',tags:['First-Person']},{label:'3ª Persona',key:'tp',tags:['Third Person','Third-Person Shooter']},{label:'Indie',key:'indie',tags:['Indie']},{label:'Casual',key:'casual',tags:['Casual']}];
 
@@ -713,12 +728,50 @@ function updGN({giftsAvail,giftsRem}){const el=$('gn'),tx=$('gntxt');if(!giftsAv
 function renderTotals(){const el=$('tots');const c=calcTotal();const P=CFG.prices;if(!cart.length){el.innerHTML='';$('wab').disabled=true;return;}let h='';if(c.normals.length){h+=`<div class="trow hd"><span style="color:var(--acc)">🟢 Normales (${c.normals.length})</span></div>`;if(c.giftsUsed>0)h+=`<div class="trow sb2"><span class="lbl">${c.giftsUsed} regalo${c.giftsUsed>1?'s':''}</span><span style="color:var(--acc)">GRATIS</span></div>`;if(c.pk6>0)h+=`<div class="trow sb2"><span class="lbl">${c.pk6}× pack de 6</span><span>${fmt(c.pk6*P.normal.pack6)}</span></div>`;if(c.pk3>0)h+=`<div class="trow sb2"><span class="lbl">${c.pk3}× pack de 3</span><span>${fmt(c.pk3*P.normal.pack3)}</span></div>`;if(c.sg>0)h+=`<div class="trow sb2"><span class="lbl">${c.sg} suelto${c.sg>1?'s':''}</span><span>${fmt(c.sg*P.normal.single)}</span></div>`;}if(c.premiums.length){const lbl=c.hasMix?`${fmt(P.premium.mixed)} c/u combo`:`${fmt(P.premium.solo)} c/u`;h+=`<div class="trow hd"><span style="color:var(--gold)">💛 Premium (${c.premiums.length}) — ${lbl}</span></div>`;if(c.hasMix){const sv=c.premiums.length*(P.premium.solo-P.premium.mixed);h+=`<div class="trow dc"><span>↓ Desc. combo</span><span>-${fmt(sv)}</span></div>`;}}if(c.specials.length){h+=`<div class="trow hd"><span style="color:var(--pur)">🟣 Especiales (${c.specials.length})</span></div>`;if(c.giftsRem>0)h+=`<div class="trow dp"><span>🎁 Faltan ${c.giftsRem} juegos de regalo(normal)</span><span>—</span></div>`;}h+=`<div class="trow tot"><span>TOTAL</span><span>${fmt(c.total)}</span></div>`;el.innerHTML=h;$('wab').disabled=false;}
 function isDesktop(){return!/Android|iPhone|iPad|iPod/i.test(navigator.userAgent);}
 
+// ── Discord mode: the order goes to the Discord bot instead of n8n + WhatsApp ──
+const DISCORD_KEY='gd_discord';
+const DISCORD_INVALID_MSG='El pedido es demasiado largo o tiene datos inválidos. Probá con menos juegos o escribinos en el hilo.';
+let DISCORD=null,discordBanner=null,waBtnHtml='';
+function initDiscordMode(){
+  const fromUrl=discordParams(location.search);
+  if(new URLSearchParams(location.search).get('src')==='discord'){try{history.replaceState(history.state,'',stripDiscordParams(location.href));}catch{}}
+  let saved=null;
+  try{if(fromUrl)sessionStorage.setItem(DISCORD_KEY,JSON.stringify(fromUrl));saved=JSON.parse(sessionStorage.getItem(DISCORD_KEY)||'null');}catch{}
+  DISCORD=fromUrl||(saved&&typeof saved.t==='string'?saved:null);
+  if(!DISCORD)return;
+  const banner=document.createElement('div');banner.className='dc-banner';banner.textContent='🎮 Pedido desde Discord';document.body.prepend(banner);discordBanner=banner;
+  const btn=$('wab');waBtnHtml=btn.innerHTML;btn.classList.add('dc');btn.innerHTML='<span style="font-size:18px">🎮</span> Hacer pedido por Discord';
+  const status=document.createElement('div');status.id='dcStatus';status.className='dc-status';status.setAttribute('aria-live','polite');btn.before(status);
+}
+// Expired link: drop the token so the tab goes back to the normal WhatsApp store (the status message stays).
+function exitDiscordMode(){
+  try{sessionStorage.removeItem(DISCORD_KEY);}catch{}
+  DISCORD=null;
+  if(discordBanner){discordBanner.remove();discordBanner=null;}
+  const btn=$('wab');btn.classList.remove('dc');btn.innerHTML=waBtnHtml;
+}
+function setDiscordStatus(kind,html){const el=$('dcStatus');if(!el)return;el.className=`dc-status ${kind}`;el.innerHTML=html;}
+async function sendDiscordOrder(juegos,monto,detalle){
+  setDiscordStatus('','');
+  if(discordOrderTooLong(juegos,detalle)){setDiscordStatus('err',DISCORD_INVALID_MSG);return;}
+  let status=0,data=null;
+  try{const resp=await fetch(CFG.discordOrderUrl,{method:'POST',headers:{'Content-Type':'text/plain'},body:discordOrderBody(DISCORD.t,juegos,monto,detalle)});status=resp.status;data=await resp.json().catch(()=>null);}catch(e){console.error('Pedido Discord:',e);}
+  const r=discordOrderResult(status,data,CFG.discordChannelUrl);
+  if(r.kind==='ok'){
+    const ids=[...new Set(cart.map(g=>g.id))];cart=[];updateCartBadge();ids.forEach(refreshCard);renderCartList();renderTotals();
+    setDiscordStatus('ok',`Pedido #${esc(r.id)} creado ✅<br><a href="${esc(r.url)}" target="_blank" rel="noopener noreferrer">Volver a Discord</a>`);
+  }else if(r.kind==='expired'){exitDiscordMode();setDiscordStatus('err','Tu link de Discord venció. Volvé a Discord y tocá <strong>Comprar</strong> de nuevo para recibir uno nuevo.');}
+  else if(r.kind==='invalid')setDiscordStatus('err',DISCORD_INVALID_MSG);
+  else if(r.kind==='limit')setDiscordStatus('err','Ya hiciste varios pedidos en la última hora. Probá de nuevo más tarde o escribinos en Discord.');
+  else setDiscordStatus('err','No pudimos crear el pedido. Revisá tu conexión y tocá <strong>Hacer pedido por Discord</strong> de nuevo.');
+}
+
 // ── MODIFICADO: guarda el pedido en n8n antes de abrir WhatsApp ──────────
 async function sendWA(){
   if(!cart.length)return;
 
   const btn = $('wab');
-  const originalHtml = btn.innerHTML;
+  let originalHtml = btn.innerHTML;
   btn.disabled = true;
   btn.innerHTML = '<span style="font-size:18px">⏳</span> GENERANDO PEDIDO...';
 
@@ -761,6 +814,8 @@ async function sendWA(){
     }
 
     const detalle = (ln + lp + ls).trim();
+
+    if(DISCORD){await sendDiscordOrder(cart.map(g => g.name).join(', '),c.total,detalle);if(!DISCORD)originalHtml=waBtnHtml;return;}
 
     const resp = await fetch(CFG.pedidoUrl, {
       method: 'POST',
@@ -806,7 +861,7 @@ async function sendWA(){
 
     window.open(`https://wa.me/${CFG.whatsapp}?text=${encodeURIComponent(msg)}`,'_blank');
   } finally {
-    btn.disabled = false;
+    btn.disabled = !cart.length;
     btn.innerHTML = originalHtml;
   }
 }
@@ -863,6 +918,7 @@ document.addEventListener('keydown',e=>{if(!$('reviewsModal').classList.contains
   function sync(){desktop.matches?activate():deactivate();fit();}
   desktop.addEventListener('change',sync);window.addEventListener('resize',fit,{passive:true});sync();
 })();
+initDiscordMode();
 startSession();
 buildTierFilters();
 buildTagFilters();
