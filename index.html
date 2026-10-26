@@ -403,6 +403,23 @@ function stripDiscordParams(href){const u=new URL(href);u.searchParams.delete('s
 function discordOrderBody(t,juegos,monto,detalle){return JSON.stringify({t,juegos,monto,detalle});}
 function safeDiscordUrl(u){try{const x=new URL(u);return x.protocol==='https:'&&x.hostname==='discord.com'?x.href:null;}catch{return null;}}
 function discordOrderResult(status,data,channelUrl){if(status===200&&data?.ok&&typeof data.id_pedido==='string')return{kind:'ok',id:data.id_pedido,url:safeDiscordUrl(data.thread_url)||channelUrl};if(status===401)return{kind:'expired'};if(status===400)return{kind:'invalid'};if(status===429)return{kind:'limit'};return{kind:'retry'};}
+// "Volver a Discord": the desktop app via discord://-/channels/<guild>/<channel>, derived only from a validated
+// https://discord.com/channels/<digits>/<digits> link. Mobile keeps the https link (universal links open the app).
+function discordAppUrl(u){const s=safeDiscordUrl(u);if(!s)return null;const x=new URL(s);if(x.username||x.password||x.port||x.search||x.hash)return null;const m=/^\/channels\/(\d{1,25})\/(\d{1,25})$/.exec(x.pathname);return m?`discord://-/channels/${m[1]}/${m[2]}`:null;}
+function discordUsesAppLink(ua,touchPoints){return!/Android|iPhone|iPad|iPod/i.test(ua)&&!(/Macintosh/.test(ua)&&touchPoints>1);}
+// Tries the app; if the page is still visible and focused after 1.5 s, opens the https link (new tab, or this tab
+// when popups are blocked). Hiding the page, leaving it or the app taking focus cancels the fallback.
+// Returns false when the caller should let the https anchor work as usual.
+function openDiscordApp(httpsUrl,ua,touchPoints,w){
+  const app=discordAppUrl(httpsUrl);if(!app||!discordUsesAppLink(ua,touchPoints))return false;
+  const d=w.document;let timer=null;
+  const stop=()=>{w.clearTimeout(timer);d.removeEventListener('visibilitychange',onVis);w.removeEventListener('pagehide',stop);w.removeEventListener('blur',stop);};
+  const onVis=()=>{if(d.visibilityState==='hidden')stop();};
+  d.addEventListener('visibilitychange',onVis);w.addEventListener('pagehide',stop);w.addEventListener('blur',stop);
+  timer=w.setTimeout(()=>{stop();const tab=w.open(httpsUrl,'_blank');if(tab)tab.opener=null;else w.location.href=httpsUrl;},1500);
+  w.location.href=app;
+  return true;
+}
 // Same limits the Worker enforces (MAX_JUEGOS, MAX_DETALLE).
 function discordOrderTooLong(juegos,detalle){return juegos.length>2000||detalle.length>4000;}
 // </discord-helpers>
@@ -760,6 +777,8 @@ async function sendDiscordOrder(juegos,monto,detalle){
   if(r.kind==='ok'){
     const ids=[...new Set(cart.map(g=>g.id))];cart=[];updateCartBadge();ids.forEach(refreshCard);renderCartList();renderTotals();
     setDiscordStatus('ok',`Pedido #${esc(r.id)} creado ✅<br><a href="${esc(r.url)}" target="_blank" rel="noopener noreferrer">Volver a Discord</a>`);
+    const back=$('dcStatus')?.querySelector?.('a');
+    if(back)back.addEventListener('click',ev=>{if(openDiscordApp(r.url,navigator.userAgent,navigator.maxTouchPoints||0,window))ev.preventDefault();});
   }else if(r.kind==='expired'){exitDiscordMode();setDiscordStatus('err','Tu link de Discord venció. Volvé a Discord y tocá <strong>Comprar</strong> de nuevo para recibir uno nuevo.');}
   else if(r.kind==='invalid')setDiscordStatus('err',DISCORD_INVALID_MSG);
   else if(r.kind==='limit')setDiscordStatus('err','Ya hiciste varios pedidos en la última hora. Probá de nuevo más tarde o escribinos en Discord.');
